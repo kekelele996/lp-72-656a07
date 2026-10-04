@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: docker.m.daocloud.io/library/mongo:6
+    container_name: kb_mongodb
+    restart: always
+    ports:
+      - "2903:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    volumes:
+      - kb_mongodb_data:/data/db
+    networks:
+      - kb_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kb_backend
+    restart: always
+    ports:
+      - "3103:3000"
+    environment:
+      PORT: 3000
+      MONGODB_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/${MONGO_DB_NAME}?authSource=admin
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      NODE_ENV: production
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - kb_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kb_frontend
+    restart: always
+    ports:
+      - "8103:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - kb_network
+
+volumes:
+  kb_mongodb_data:
+    name: kb_mongodb_data
+
+networks:
+  kb_network:
+    name: kb_network
+    driver: bridge
